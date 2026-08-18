@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>微信公众号文章排版预览</title>
+<!--
+  ============================================================
+  本文件为「公众号正文排版」网页骨架。
+
+  使用方法：
+  1. 把转换好的、使用内联样式的正文 HTML，替换下方
+     <article id="wechat-content"> 内部的
+     <!-- WECHAT_ARTICLE_CONTENT --> 占位注释。
+  2. 在下方 <script> 开头的 CONFIG 中填写：
+     - themeName         当前排版主题名称（显示在工具栏）
+     - hasImageIssue     是否有需重新上传的图片（http/本地/blob/data 等）
+     - hasExternalLinks  是否有可能受限的外部链接
+  3. 保存为 wechat-article.html 后即可在浏览器打开。
+
+  注意：
+  - 只有 <article id="wechat-content"> 内部内容会被复制。
+  - 正文内不得出现 <script>/<style>/on* 事件/class/id/data-*，
+    所有关键样式必须内联。
+  ============================================================
+-->
+<style>
+  /* ============ 工具栏样式（不会被复制进公众号） ============ */
+  :root {
+    --bar-bg: #f7f8fa;
+    --bar-border: #e5e7eb;
+    --bar-text: #374151;
+    --bar-muted: #6b7280;
+    --accent: #2563EB;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background-color: #eef0f3;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    transition: background-color .25s ease;
+  }
+  body.dark { background-color: #14161a; }
+
+  #toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bar-bg);
+    border-bottom: 1px solid var(--bar-border);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: var(--bar-text);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  body.dark #toolbar {
+    background: #1e2126;
+    border-bottom-color: #2b2f36;
+    color: #d1d5db;
+  }
+  #toolbar .group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  #toolbar .sep { width: 1px; height: 18px; background: var(--bar-border); }
+  body.dark #toolbar .sep { background: #33373e; }
+
+  #toolbar button {
+    border: 1px solid var(--bar-border);
+    background: #ffffff;
+    color: var(--bar-text);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  body.dark #toolbar button { background: #262a31; color: #d1d5db; border-color: #3a4048; }
+  #toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  #toolbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #toolbar button.primary:hover { opacity: .9; color: #fff; }
+  #toolbar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  #toolbar .tag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #eef2ff;
+    color: #4338ca;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  body.dark #toolbar .tag { background: #2c3040; color: #a5b4fc; }
+  #toolbar .tag.warn { background: #fff7e6; color: #b45309; }
+  body.dark #toolbar .tag.warn { background: #3a2f1d; color: #fbbf24; }
+
+  #copyStatus {
+    font-size: 12px;
+    color: var(--bar-muted);
+    min-width: 80px;
+  }
+  body.dark #copyStatus { color: #9ca3af; }
+  #copyStatus.ok { color: #16a34a; }
+  #copyStatus.err { color: #dc2626; }
+  body.dark #copyStatus.ok { color: #4ade80; }
+  body.dark #copyStatus.err { color: #f87171; }
+
+  /* ============ 预览区（手机宽度可调） ============ */
+  #preview-stage {
+    display: flex;
+    justify-content: center;
+    padding: 24px 12px 48px;
+  }
+  #preview-frame {
+    width: 375px;
+    max-width: 100%;
+    background: #ffffff;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 16px rgba(0,0,0,.08);
+    transition: width .2s ease;
+  }
+  body.dark #preview-frame {
+    background: #ffffff;
+    box-shadow: 0 2px 16px rgba(0,0,0,.5);
+  }
+  /* 正文容器本身保持可复制内容的纯净：宽度随预览框 */
+  #wechat-content {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 24px 20px;
+    word-break: break-word;
+    background: #ffffff;
+  }
+</style>
+</head>
+<body>
+
+  <!-- ================= 工具栏（非复制区域） ================= -->
+  <div id="toolbar">
+    <div class="group">
+      <button id="btnCopyRich" class="primary" type="button">复制公众号正文</button>
+      <button id="btnCopyPlain" type="button">复制纯文本</button>
+      <span id="copyStatus"></span>
+    </div>
+
+    <span class="sep"></span>
+
+    <div class="group">
+      <span id="themeName" class="tag"></span>
+      <span id="integrityStatus" class="tag">内容完整性检查：通过</span>
+    </div>
+
+    <div class="group">
+      <span id="imageWarning" class="tag warn" style="display:none;">含需重新上传的图片</span>
+      <span id="linkWarning" class="tag warn" style="display:none;">含可能受限的外链</span>
+    </div>
+
+    <span class="sep"></span>
+
+    <div class="group">
+      <span>预览宽度：</span>
+      <button type="button" data-width="320">320</button>
+      <button type="button" data-width="375" class="active">375</button>
+      <button type="button" data-width="414">414</button>
+      <button type="button" data-width="100%">100%</button>
+    </div>
+
+    <div class="group">
+      <button id="btnToggleDark" type="button">深色预览</button>
+    </div>
+  </div>
+
+  <!-- ================= 预览区 ================= -->
+  <div id="preview-stage">
+    <div id="preview-frame">
+      <!-- 只有这里的内容会被复制到公众号 -->
+      <article id="wechat-content">
+        <!-- WECHAT_ARTICLE_CONTENT -->
+      </article>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= 配置（替换占位值） ================= */
+  var CONFIG = {
+    themeName: "默认主题",       // 当前排版主题名称
+    hasImageIssue: false,        // true 时工具栏显示「含需重新上传的图片」
+    hasExternalLinks: false      // true 时工具栏显示「含可能受限的外链」
+  };
+
+  /* ================= 元素引用 ================= */
+  var $ = function (id) { return document.getElementById(id); };
+  var btnCopyRich = $("btnCopyRich");
+  var btnCopyPlain = $("btnCopyPlain");
+  var copyStatus = $("copyStatus");
+  var themeNameEl = $("themeName");
+  var imageWarning = $("imageWarning");
+  var linkWarning = $("linkWarning");
+  var btnToggleDark = $("btnToggleDark");
+  var widthButtons = document.querySelectorAll("#toolbar button[data-width]");
+  var previewFrame = $("preview-frame");
+
+  /* ================= 初始化工具栏状态 ================= */
+  themeNameEl.textContent = CONFIG.themeName || "默认主题";
+  if (CONFIG.hasImageIssue) { imageWarning.style.display = "inline-block"; }
+  if (CONFIG.hasExternalLinks) { linkWarning.style.display = "inline-block"; }
+
+  function setCopyStatus(text, ok) {
+    copyStatus.textContent = text;
+    copyStatus.className = ok ? "ok" : (ok === false ? "err" : "");
+  }
+
+  /* ================= 复制正文（text/html + text/plain） ================= */
+  function getContentHTML() { return $("wechat-content").innerHTML; }
+  function getContentText() { return $("wechat-content").innerText; }
+
+  function legacyCopyHTML(html) {
+    // DOM Selection + execCommand 兜底（可携带富文本）
+    var holder = document.createElement("div");
+    holder.setAttribute("contenteditable", "true");
+    holder.style.position = "fixed";
+    holder.style.left = "-9999px";
+    holder.style.top = "0";
+    holder.innerHTML = html;
+    document.body.appendChild(holder);
+    var range = document.createRange();
+    range.selectNodeContents(holder);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    sel.removeAllRanges();
+    document.body.removeChild(holder);
+    return ok;
+  }
+
+  function legacyCopyText(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function copyRich() {
+    var html = getContentHTML();
+    var text = getContentText();
+
+    if (navigator.clipboard && window.ClipboardItem) {
+      return navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" })
+        })
+      ]).then(function () { return true; })
+        .catch(function () { return legacyCopyHTML(html); });
+    }
+    return Promise.resolve(legacyCopyHTML(html));
+  }
+
+  function copyPlain() {
+    var text = getContentText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text)
+        .then(function () { return true; })
+        .catch(function () { return legacyCopyText(text); });
+    }
+    return Promise.resolve(legacyCopyText(text));
+  }
+
+  btnCopyRich.addEventListener("click", function () {
+    copyRich().then(function (ok) {
+      if (ok) { setCopyStatus("已复制正文（含格式）", true); }
+      else { setCopyStatus("复制失败，请手动全选正文复制", false); }
+    });
+  });
+
+  btnCopyPlain.addEventListener("click", function () {
+    copyPlain().then(function (ok) {
+      if (ok) { setCopyStatus("已复制纯文本", true); }
+      else { setCopyStatus("复制失败，请手动全选正文复制", false); }
+    });
+  });
+
+  /* ================= 手机预览宽度切换 ================= */
+  widthButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      widthButtons.forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      previewFrame.style.width = btn.getAttribute("data-width");
+    });
+  });
+
+  /* ================= 浅色 / 深色预览切换 ================= */
+  btnToggleDark.addEventListener("click", function () {
+    var dark = document.body.classList.toggle("dark");
+    btnToggleDark.textContent = dark ? "浅色预览" : "深色预览";
+  });
+})();
+</script>
+</body>
+</html>
